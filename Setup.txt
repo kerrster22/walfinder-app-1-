@@ -1,0 +1,182 @@
+# Create a Quick Start guide as a text file for the team.
+content = r"""WALFINDER QUICK START (Windows)
+
+This guide gets the backend (FastAPI + YOLOv8) and the frontend (Next.js + Tailwind) running fast,
+with tips for camera selection, performance, and voice guidance.
+
+──────────────────────────────────────────────────────────────────────────────
+0) PREREQUISITES
+──────────────────────────────────────────────────────────────────────────────
+- Windows 10/11
+- Python 3.11 (64-bit) installed and on PATH
+- Node.js 18+ (npm 9+)
+- A USB or laptop webcam
+- PowerShell (recommended)
+
+If Python 3.11 isn’t default, use the full path to your venv python as shown below.
+
+
+──────────────────────────────────────────────────────────────────────────────
+1) PROJECT LAYOUT (key bits)
+──────────────────────────────────────────────────────────────────────────────
+backend/
+  app/main.py            ← FastAPI server with camera, detection, WS, MJPEG, team clustering
+  requirements.txt
+frontend/ (Next.js app)
+  app/page.tsx           ← main UI
+  hooks/useDetections.ts
+  hooks/useVoiceSafety.ts ← TTS logic (Web Speech API)
+  lib/dangerNLG.ts        ← small “AI-like” description generator
+  components/...          ← CameraFeed, AIDetectionFeed, etc.
+
+
+──────────────────────────────────────────────────────────────────────────────
+2) BACKEND – SETUP & RUN
+──────────────────────────────────────────────────────────────────────────────
+Open PowerShell in the backend folder:
+
+  cd backend
+
+Create & activate a virtualenv:
+
+  py -3.11 -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+
+Install deps (pinned for Windows CPU):
+
+  python -m pip install --upgrade pip
+  pip install -r requirements.txt
+
+Start the server (CPU-friendly defaults):
+(keeps camera preview at 1080p but runs YOLO smaller for speed; tweak as desired)
+
+  $env:CAM_W=1920; $env:CAM_H=1080; $env:CAM_FPS=30;
+  $env:IMG_SIZE=416; $env:CONF_THRESH=0.35; $env:INFER_HZ=7;
+  $env:MODEL_NAME="yolov8s.pt"; # or yolov8n.pt for faster, fewer detections
+  python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level info
+
+Key endpoints:
+  Root                http://127.0.0.1:8000/
+  Preview (MJPEG)     http://127.0.0.1:8000/preview.mjpg
+  WebSocket           ws://127.0.0.1:8000/ws/detections
+  Camera status       http://127.0.0.1:8000/camera/status
+  Camera scan         http://127.0.0.1:8000/camera/scan
+  Camera select       http://127.0.0.1:8000/camera/select?index=1&backend=msmf&w=1920&h=1080&fps=30
+
+Pick the right camera:
+  1) Open /camera/scan to see which index/backend has_frame=true
+  2) Use /camera/select?index=IDX&backend=dshow (or msmf) to switch
+
+Performance knobs (env vars):
+  CAM_W, CAM_H, CAM_FPS           → requested camera resolution/fps (1080p preview recommended)
+  MODEL_NAME                      → yolov8n.pt (fast) or yolov8s.pt (more recall, slower)
+  IMG_SIZE                        → detector size (320–480 CPU-friendly)
+  CONF_THRESH                     → lower = more detections, more false positives
+  INFER_HZ                        → cap detector Hz (6–10 typical on CPU)
+  JPEG_QUALITY                    → 60–75 is good for MJPEG preview
+  TEAM_MIN_COUNT / TEAM_LINK_THRESH → “team” group sensitivity
+
+Note: the backend only pushes MED/HIGH threats (and “team”) to the UI voice system,
+and speaks only on real changes/spikes (so it’s calm by default).
+
+
+──────────────────────────────────────────────────────────────────────────────
+3) FRONTEND – SETUP & RUN
+──────────────────────────────────────────────────────────────────────────────
+Open a new terminal in the frontend folder:
+
+  cd frontend
+
+Create .env.local (point it at your backend):
+  NEXT_PUBLIC_WS_URL=ws://127.0.0.1:8000/ws/detections
+  NEXT_PUBLIC_PREVIEW_URL=http://127.0.0.1:8000/preview.mjpg
+
+Install and start:
+
+  npm install
+  npm run dev
+  # Open http://localhost:3000
+
+UI notes:
+- Left panel shows detections; right is the camera view + overlay.
+- Top-right has a Voice toggle (On/Off) and a Voice family picker.
+- First user click is required before TTS can speak (browser restriction).
+- TTS runs offline via the Web Speech API and prefers “Natural/Microsoft/Google” voices.
+
+
+──────────────────────────────────────────────────────────────────────────────
+4) DEMO FLOW (90 seconds)
+──────────────────────────────────────────────────────────────────────────────
+1) Start backend (PowerShell in backend/ with venv active)
+2) Visit http://127.0.0.1:8000/preview.mjpg to verify camera
+3) If wrong camera, open /camera/scan then /camera/select?index=...&backend=...
+4) Start frontend: npm run dev → http://localhost:3000
+5) Click “Voice: On” once (enables browser audio)
+6) Walk an object (chair/laptop/person) into view → overlay boxes + concise voice alert:
+   “Alert: a chair slightly left, fairly close. Please proceed with caution.”
+7) Large group → synthetic “team” detection and stronger warning.
+
+
+──────────────────────────────────────────────────────────────────────────────
+5) TROUBLESHOOTING (Windows)
+──────────────────────────────────────────────────────────────────────────────
+• Uvicorn not found
+  - You’re not in the venv. Run: .\.venv\Scripts\Activate.ps1
+
+• Torch / DLL / Matplotlib / Numpy import errors
+  - Ensure you’re using the venv python:
+      & "$PWD\.venv\Scripts\python.exe" -V
+  - Reinstall pinned deps:
+      pip install --force-reinstall -r requirements.txt
+  - If numpy errors persist, try:
+      pip install --force-reinstall "numpy==1.26.4"
+
+• OpenCV camera fails or wrong camera opens
+  - Use /camera/scan then /camera/select?index=...&backend=dshow (or msmf)
+  - Many USB cameras prefer MJPG at 1080p; the backend requests that for you.
+
+• TTS doesn’t speak
+  - Click anywhere / toggle “Voice: On” to give the page audio permission.
+  - Try a different voice family in the picker (“Natural”, “Microsoft”, “Google”).
+
+• Frontend can’t connect to backend
+  - Make sure NEXT_PUBLIC_WS_URL/NEXT_PUBLIC_PREVIEW_URL match the backend host/port.
+  - On corporate networks, localhost might be blocked for WS; try 127.0.0.1.
+
+• Voice is too chatty or too quiet
+  - Chatty: increase cooldown in page.tsx useVoiceSafety call (e.g., cooldownMs: 8000–10000).
+  - Quiet: reduce cooldownMs (e.g., 4000) or CONF_THRESH (e.g., 0.30) for more triggers.
+
+
+──────────────────────────────────────────────────────────────────────────────
+6) HACKATHON CHECKLIST
+──────────────────────────────────────────────────────────────────────────────
+[ ] Backend running (preview.mjpg shows video)
+[ ] Correct camera selected (status shows width/height/fps you expect)
+[ ] Frontend running (overlay boxes draw)
+[ ] Voice toggle ON; choose best voice family (Natural/Microsoft)
+[ ] Walk-through demo script rehearsed (chair/person/team)
+[ ] Optional: set defaults via env (CAM_INDEX, CAM_BACKEND) if needed
+[ ] Optional: raise IMG_SIZE to 480 for better recall if CPU allows
+
+
+──────────────────────────────────────────────────────────────────────────────
+7) ONE-LINERS (PowerShell)
+──────────────────────────────────────────────────────────────────────────────
+# Backend start (from backend/, venv active)
+$env:CAM_W=1920; $env:CAM_H=1080; $env:CAM_FPS=30; `
+$env:IMG_SIZE=416; $env:CONF_THRESH=0.35; $env:INFER_HZ=7; `
+$env:MODEL_NAME="yolov8s.pt"; `
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level info
+
+# Switch to USB camera index 1 at 1080p
+Start-Process "http://127.0.0.1:8000/camera/select?index=1&backend=msmf&w=1920&h=1080&fps=30"
+
+# Frontend start (from frontend/)
+npm install; npm run dev
+"""
+
+with open("/mnt/data/QUICK_START.txt", "w", encoding="utf-8") as f:
+    f.write(content)
+
+"/mnt/data/QUICK_START.txt"
